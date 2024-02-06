@@ -157,13 +157,14 @@ jobs:
           rm -rf $source_dir
         }
         
-        git_clone https://github.com/epezent/implot.git ./addons/imguiimplot && rm -rf ./addons/imguiimplot/.git*
+        git_clone https://github.com/epezent/implot.git ./imguiimplot
+        git_partial_clone imgui_with_addons https://github.com/origamidance/imgui.git imgui_with_addons addons && mvdir_force imgui_with_addons
         
     - name: Delete duplicated packages
       continue-on-error: true
       run: |
         shopt -s extglob
-        rm -rf ./addons/*/.git*
+        rm -rf */.git*
         rm -rf tmp
         
     - name: Modify
