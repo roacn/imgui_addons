@@ -157,7 +157,7 @@ jobs:
         }
         
         git_clone https://github.com/epezent/implot.git ./imguiimplot
-        git_partial_clone imgui_with_addons https://github.com/Flix01/imgui.git tmp addons && mvdir_force tmp
+        git_partial_clone imgui_with_addons https://github.com/Flix01/imgui.git tmp addons && mvdir_force tmp/addons
         
     - name: Delete duplicated packages
       continue-on-error: true
