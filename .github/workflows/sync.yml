@@ -40,6 +40,7 @@ jobs:
         shopt -s extglob
         set +e
         git rm -r --cached * >/dev/null 2>&1 &
+        rm -rf `find ./* -maxdepth 0 -type d ! -name ".github"` >/dev/null 2>&1
         
         function git_clone() {
           local repo_url="$1"
@@ -157,7 +158,7 @@ jobs:
         }
         
         git_clone https://github.com/epezent/implot.git ./imguiimplot
-        git_partial_clone imgui_with_addons https://github.com/Flix01/imgui.git tmp addons && mvdir_force tmp/addons
+        git_partial_clone imgui_with_addons https://github.com/Flix01/imgui.git tmp addons && mv tmp/addons/* ./
         
     - name: Delete duplicated packages
       continue-on-error: true
