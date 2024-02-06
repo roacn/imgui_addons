@@ -1,0 +1,194 @@
+#
+# This is free software, lisence use MIT.
+# 
+
+name: Merge-Upstream-Lede
+on:
+  workflow_dispatch:
+  repository_dispatch:
+  schedule:
+    - cron: 5 */8 * * *
+
+env:
+  BRANCH: master
+  
+jobs:
+  merge:
+    if: github.event.repository.owner.id == github.event.sender.id || ! github.event.sender.id
+    runs-on: Ubuntu-20.04
+
+    steps:
+    - name: Check inputs
+      run: |
+        echo github.ref is: ${{ github.ref }}
+        echo github.event_name is: ${{ github.event_name }}
+        
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ env.BRANCH }}
+        fetch-depth: 0
+
+    - name: Set git identity
+      run : |
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+        sudo timedatectl set-timezone "Asia/Shanghai"
+        
+    - name: Syn upstream
+      run: |
+        shopt -s extglob
+        set +e
+        git rm -r --cached * >/dev/null 2>&1 &
+        rm -rf `find ./* -maxdepth 0 -type d ! -name ".github/diy"` >/dev/null 2>&1
+        
+        function git_clone() {
+          local repo_url="$1"
+          local local_save_dir="$2"
+
+          if [ -n "$local_save_dir" ]; then
+            rm -rf $local_save_dir 
+          fi
+          
+          git clone --depth 1 $repo_url $local_save_dir
+          if [ "$?" != 0 ]; then
+            echo "error on $repo_url"
+            pid="$( ps -q $$ )"
+            kill $pid
+          fi
+        }
+        
+        function git_branch_clone() {
+          local branch="$1"
+          local repo_url="$2"
+          local local_save_dir="$3"
+          if [ -n "$local_save_dir" ]; then
+            rm -rf $local_save_dir 
+          fi
+          git clone --depth 1 -b $branch $repo_url $local_save_dir
+          if [ "$?" != 0 ]; then
+            echo "error on $repo_url"
+            pid="$( ps -q $$ )"
+            kill $pid
+          fi
+        }
+        
+        function git_sparse_clone() {
+          branch="$1" repo_url="$2" local_save_dir="$3" && shift 3
+          git clone -b $branch --depth 1 --filter=blob:none --sparse $repo_url $local_save_dir
+          if [ "$?" != 0 ]; then
+            echo "error on $repo_url"
+            pid="$( ps -q $$ )"
+            kill $pid
+          fi
+          cd $local_save_dir
+          git sparse-checkout init --cone
+          git sparse-checkout set $@
+          mv -n $@ ../ || true
+          cd ..
+          rm -rf $local_save_dir
+        }
+        
+        function git_sparse_clone_commit() {
+          commitid="$1" repo_url="$2" local_save_dir="$3" && shift 3
+          git clone --filter=blob:none --sparse $repo_url $local_save_dir
+          cd $local_save_dir
+          git checkout $commitid
+          git sparse-checkout init --cone
+          git sparse-checkout set $@
+          mv -n $@ ../ || true
+          cd ..
+          rm -rf $local_save_dir
+        }
+        
+        function git_partial_clone() {
+          if [ $# -lt 4 ]; then
+            echo "Usage: git_partial_clone <repo_branch> <repo_url> <local_save_dir> <repo_folder_path1 repo_folder_path2 ...>"
+            return 1
+          fi
+          local repo_branch="$1"
+          local repo_url="$2"
+          local local_save_dir="$3"
+
+          shift 3
+        
+          mkdir ~/$local_save_dir
+          cd ~/$local_save_dir
+          git init --initial-branch=$repo_branch
+          git remote add -f origin $repo_url > /dev/null 2>&1
+          git config core.sparsecheckout true
+          while [ $# -gt 0 ]; do
+            echo $1 >> .git/info/sparse-checkout
+            shift
+          done
+          git pull --depth=1 origin $repo_branch
+          find ~/$local_save_dir -name ".git*" | xargs rm -rf {}
+          cd $GITHUB_WORKSPACE
+          mv -f ~/$local_save_dir $GITHUB_WORKSPACE/$local_save_dir
+        }
+
+        function mvdir() {
+          local source_dir="$1"
+          local dest_dir="$2"
+          if [ -z "$dest_dir" ]; then
+            mv -n `find $source_dir/* -maxdepth 0 -type d` ./
+          else
+            [ ! -d "./$dest_dir" ] && mkdir -p ./$dest_dir
+            mv -n `find $source_dir/* -maxdepth 0 -type d` ./$dest_dir
+          fi
+          rm -rf $source_dir
+        }
+        
+        function mvdir_force() {
+          local source_dir="$1"
+          local dest_dir="$2"
+          if [ -z "$dest_dir" ]; then
+            mv -f `find $source_dir/* -maxdepth 0 -type d` ./
+          else
+            [ ! -d "./$dest_dir" ] && mkdir -p ./$dest_dir
+            mv -f `find $source_dir/* -maxdepth 0 -type d` ./$dest_dir
+          fi
+          rm -rf $source_dir
+        }
+
+        function mvluci() {
+          local source_dir="$1"
+          mv -n `find $source_dir/* -maxdepth 0 -type d -name "luci-*"` ./
+          rm -rf $source_dir
+        }
+        
+        git_clone https://github.com/epezent/implot.git ./addons/imguiimplot && rm -rf ./addons/imguiimplot/.git*
+        
+    - name: Delete duplicated packages
+      continue-on-error: true
+      run: |
+        shopt -s extglob
+        rm -rf ./addons/*/.git*
+        rm -rf tmp
+        
+    - name: Modify
+      continue-on-error: true
+      run: |
+        bash .github/diy/create_acl_for_luci.sh -a >/dev/null 2>&1 || true
+        bash .github/diy/convert_translation.sh -a >/dev/null 2>&1 || true
+      
+    - name: SSH connection to Actions
+      uses: kiddin9/debugger-action@master
+      if: github.event.inputs.ssh == 'true'
+
+    - name: Apply
+      continue-on-error: true
+      run: |
+        Emoji=("🎉" "🤞" "✨" "🎁" "🎈" "🎄" "🎨" "💋" "🍓" "🍕" "🍉" "💐" "🌴" "🚀" "🛸" "🗽" "⛅" "🌈" "🔥" "⛄" "🐶" "🏅" "🦄" "🐤")
+        git add .
+        if [ -n "$(git status -s)" ]; then
+          git commit -m "${Emoji[$[$RANDOM % ${#Emoji[@]}]]} Sync $(date +%Y-%m-%d" "%H:%M)"
+          git push -f origin ${{ env.BRANCH }}
+        fi
+        
+    - name: Delete workflow runs
+      uses: Mattraks/delete-workflow-runs@main
+      continue-on-error: true
+      with:
+        retain_days: 0
+        keep_minimum_runs: 2
